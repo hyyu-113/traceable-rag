@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import pymupdf
 import pytest
 from openpyxl import Workbook
+from reportlab.pdfgen.canvas import Canvas
 from test_loaders import document
 
 from traceable_rag.loaders import LoaderFactory
@@ -12,9 +12,9 @@ from traceable_rag.utils import DocumentParseError
 
 def test_blank_pdf_refuses(tmp_path: Path) -> None:
     path = tmp_path / "blank.pdf"
-    with pymupdf.open() as pdf:
-        pdf.new_page()
-        pdf.save(path)
+    canvas = Canvas(str(path))
+    canvas.showPage()
+    canvas.save()
     with pytest.raises(DocumentParseError, match="OCR"):
         LoaderFactory.load(document(path))
 

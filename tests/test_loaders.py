@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import pymupdf
 from docx import Document as WordDocument
 from openpyxl import Workbook
+from reportlab.pdfgen.canvas import Canvas
 
 from traceable_rag.domain import Document
 from traceable_rag.loaders import LoaderFactory
@@ -16,11 +16,10 @@ def document(path: Path) -> Document:
 
 def test_pdf(tmp_path: Path) -> None:
     path = tmp_path / "sample.pdf"
-    with pymupdf.open() as pdf:
-        page = pdf.new_page()
-        page.insert_text((72, 72), "Travel policy")
-        page.insert_text((72, 170), "Hotel: 600")
-        pdf.save(path)
+    canvas = Canvas(str(path), pagesize=(600, 800))
+    canvas.drawString(72, 728, "Travel policy")
+    canvas.drawString(72, 630, "Hotel: 600")
+    canvas.save()
     blocks = LoaderFactory.load(document(path))
     assert len(blocks) == 2
     assert blocks[0].source_location.page_number == 1

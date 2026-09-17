@@ -1,15 +1,21 @@
 import logging
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from pathlib import Path
 from zipfile import ZipFile
 
-import pymupdf
 from docx import Document as WordDocument
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LAParams, LTContainer, LTTextBox
+from pdfminer.pdfdocument import PDFDocument, PDFPasswordIncorrect
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdfparser import PDFParser
 
 from traceable_rag.domain import Document, DocumentBlock, SourceLocation
 from traceable_rag.utils import DocumentParseError, UnsupportedFileTypeError, sha256
@@ -35,18 +41,46 @@ class BaseLoader(ABC):
 
 
 class PdfLoader(BaseLoader):
+    """提取文字层和块坐标，不执行 OCR 或表格结构识别。"""
+
+    @staticmethod
+    def _text_boxes(container: LTContainer) -> Iterator[LTTextBox]:
+        # Form XObject 中也可能包含正文；只取文本框，不重复收集其内部文本行。
+        for item in container:
+            if isinstance(item, LTTextBox):
+                yield item
+            elif isinstance(item, LTContainer):
+                yield from PdfLoader._text_boxes(item)
+
     def load(self, document: Document) -> list[DocumentBlock]:
         blocks = []
-        with pymupdf.open(document.file_path) as pdf:
-            if pdf.needs_pass:
-                raise DocumentParseError("不支持加密 PDF，请先解除密码。")
-            for page in pdf:
-                for item in page.get_text("blocks", sort=True):
-                    if item[6] == 0 and item[4].strip():
-                        location = SourceLocation(page_number=page.number + 1, bbox=tuple(item[:4]))
-                        block = self.block(document, "paragraph", item[4], location)
-                        block.metadata.update({"page_width": page.rect.width, "page_height": page.rect.height})
-                        blocks.append(block)
+        try:
+            with open(document.file_path, "rb") as source:
+                pdf = PDFDocument(PDFParser(source))
+                if pdf.encryption:
+                    raise DocumentParseError("不支持加密 PDF，请先解除密码。")
+                resources = PDFResourceManager(caching=False)
+                device = PDFPageAggregator(resources, laparams=LAParams(all_texts=True))
+                try:
+                    interpreter = PDFPageInterpreter(resources, device)
+                    for page_number, page in enumerate(PDFPage.create_pages(pdf), 1):
+                        interpreter.process_page(page)
+                        layout = device.get_result()
+                        boxes = sorted(self._text_boxes(layout), key=lambda item: (-item.y1, item.x0))
+                        for item in boxes:
+                            text = item.get_text().strip()
+                            if not text:
+                                continue
+                            # PDFMiner 以左下角为原点；统一转换成页面左上角坐标，保持接口约定。
+                            bbox = (item.x0 - layout.x0, layout.y1 - item.y1, item.x1 - layout.x0, layout.y1 - item.y0)
+                            location = SourceLocation(page_number=page_number, bbox=bbox)
+                            block = self.block(document, "paragraph", text, location)
+                            block.metadata.update({"page_width": layout.width, "page_height": layout.height, "pdf_parser": "pdfminer.six"})
+                            blocks.append(block)
+                finally:
+                    device.close()
+        except PDFPasswordIncorrect as exc:
+            raise DocumentParseError("不支持加密 PDF，请先解除密码。") from exc
         return blocks
 
 
