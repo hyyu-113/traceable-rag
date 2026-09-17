@@ -1,0 +1,16 @@
+[project]
+name = "traceable-rag"
+version = "0.1.0"
+description = "支持原文引用的中文文档检索与问答"
+requires-python = ">=3.12,<3.13"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic-settings>=2.8,<3", "python-multipart>=0.0.20", "pymupdf>=1.25,<2", "python-docx>=1.1,<2", "openpyxl>=3.1,<4", "rank-bm25>=0.2.2,<1", "qdrant-client>=1.14,<2", "httpx>=0.28,<1", "jieba>=0.42.1"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
